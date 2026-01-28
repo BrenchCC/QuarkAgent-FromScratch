@@ -16,7 +16,7 @@ def _default_memory_path() -> Path:
     """
     default_path = Path(os.environ.get("MINIAGENT_HOME", ".miniagent")).expanduser()
     default_path.mkdir(parents = True, exist_ok = True)
-    return os.path.join(default_path, "memory.json")
+    return default_path / "memory.json"
 
 
 @dataclass

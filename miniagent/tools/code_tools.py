@@ -111,6 +111,7 @@ def write(path: str, content: str) -> str:
         logger.exception("write failed")
         return f"error: {e}"
 
+@register_tool
 # noqa: A002
 def edit(path: str, old: str, new: str, all: bool = False) -> str:
     """

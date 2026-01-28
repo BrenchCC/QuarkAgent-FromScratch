@@ -46,7 +46,8 @@ __all__ = [
 try:
     from .basic_tools import (
         calculator, get_current_time, get_system_info, file_status,
-        disk_usage, process_list, system_load, web_search, http_request
+        disk_usage, process_list, system_load, web_search, http_request,
+        open_browser, open_app, clipboard_copy, create_docx
     )
     logger.debug("Imported all tools from basic_tools")
 except ImportError as e:
@@ -271,9 +272,10 @@ def load_tools(tools: Union[List[str], str, None] = None) -> List[str]:
     if tools is None:
         # Load all available tools
         tools = [
-            "calculator", "get_current_time", "get_system_info", "file_stats",
-            "disk_usage", "process_list", "system_load", "web_search", "http_request"
-            , "read", "write", "edit", "glob", "grep", "bash"
+            "calculator", "get_current_time", "get_system_info", "file_status",
+            "disk_usage", "process_list", "system_load", "web_search", "http_request",
+            "open_browser", "open_app", "clipboard_copy", "create_docx",
+            "read", "write", "edit", "glob", "grep", "bash"
         ]
     
     if isinstance(tools, str):

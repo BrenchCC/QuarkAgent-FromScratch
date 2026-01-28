@@ -472,24 +472,43 @@ def system_load() -> Dict[str, Any]:
         raise ValueError(f"Failed to get system load information: {str(e)}")
     
 @register_tool
-def open_browser(url: str) -> str:
+def open_browser(url: str = None, q: str = None) -> str:
     """
     Open a URL in the default web browser.
-    
+
     Args:
         url: The URL to open. Can also be a search query (will use Google).
-        
+        q: Search query (shorthand for url when it's a search term)
+
     Returns:
         Status message
     """
-    logger.info(f"[tool calls] open_browser url: {url}")
+    # Determine the target from either url or q parameter
+    target = url
+    if not target and q:
+        target = q
+
+    if not target:
+        raise ValueError("open_browser requires either 'url' or 'q' parameter")
+
+    logger.info(f"[tool calls] open_browser target: {target}")
+
     # If it doesn't look like a URL, treat it as a search query
-    if not url.startswith(('http://', 'https://', 'file://')):
-        url = f"https://www.google.com/search?q={requests.utils.quote(url)}"
-    
+    if not target.startswith(('http://', 'https://', 'file://')):
+        # 检查是否已经是 URL 编码过的，如果是，则解码后再编码
+        import urllib.parse
+        try:
+            # 尝试解码，看看是否已经是编码过的
+            decoded_target = urllib.parse.unquote(target)
+            if decoded_target != target:
+                target = decoded_target
+        except:
+            pass
+        target = f"https://www.google.com/search?q={requests.utils.quote(target)}"
+
     try:
-        webbrowser.open(url)
-        return f"Opened browser with: {url}"
+        webbrowser.open(target)
+        return f"Opened browser with: {target}"
     except Exception as e:
         raise ValueError(f"Failed to open browser: {str(e)}")
     

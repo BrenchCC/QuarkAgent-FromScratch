@@ -26,10 +26,10 @@ class MiniAgent():
         model: str,
         api_key: str,
         base_url: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: float = 0.1,
         top_p: float = 0.95,
-        system_prompt: str = "You are a helpful assistant called MiniAgent created by brench that can use tools to get information and perform tasks.",
-        use_reflector: bool = True,
+        system_prompt_file: Optional[str] = "prompts/system_prompt.md",
+        use_reflector: bool = False  ,
         **kwargs
     ):
         """
@@ -40,16 +40,31 @@ class MiniAgent():
             api_key: API key for LLM service
             base_url: Base URL for LLM service (optional)
             temperature: Temperature for LLM sampling (default: 0.7)
-            system_prompt: System prompt for MiniAgent (default: "You are a helpful assistant called MiniAgent created by brench that can use tools to get information and perform tasks.")
+            system_prompt: System prompt for MiniAgent (optional)
+            system_prompt_file: Path to system prompt file (optional, defaults to ./prompts/system_prompt.txt)
             use_reflector: Whether to use reflector for response improvement (default: False)
-            **kwargs: Additional keyword arguments for LLM client   
+            **kwargs: Additional keyword arguments for LLM client
         """
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
         self.temperature = temperature
         self.top_p = top_p
-        self.system_prompt = system_prompt
+
+        # Load system prompt
+        # Determine prompt file path
+        prompt_file = system_prompt_file or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts", "system_prompt.txt")
+        if os.path.exists(prompt_file):
+            try:
+                with open(prompt_file, "r", encoding="utf-8") as f:
+                    self.system_prompt = f.read().strip()
+                logger.info(f"System prompt loaded from file: {prompt_file}")
+            except Exception as e:
+                logger.warning(f"Failed to load system prompt from file {prompt_file}: {e}")
+                self.system_prompt = "You are a helpful assistant called MiniAgent created by brench that can use tools to get information and perform tasks."
+        else:
+            logger.warning(f"System prompt file not found: {prompt_file}")
+            self.system_prompt = "You are a helpful assistant called MiniAgent created by brench that can use tools to get information and perform tasks."
         self.tools = []
         self.client = None
         self.use_reflector = use_reflector
@@ -330,20 +345,19 @@ class MiniAgent():
         logger.error(f"Failed to extract balanced JSON from text: {text[:100]}...")
         return None
 
-    def _parse_tool_call(self, content: str) -> Optional[dict]:
+    def _parse_tool_call(self, content: str) -> Optional[Dict]:
         """
-        Parse a tool call from LLM content
-        
-        Args:
-            content: LLM-generated content containing tool call
-            
-        Returns:
-            Parsed tool call dictionary if found, None otherwise
-        """
-        logger.debug(f"Parsing tool call from content: {content[:100]}...")
-        logger.debug(f"Query Content length: {len(content)}")
+        Parse tool call from LLM response
 
-        #First, try to find TOOL: pattern and extract tool name
+        Args:
+            content: LLM response content
+
+        Returns:
+            Tool call information or None
+        """
+        logger.debug(f"Parsing tool call from content (length={len(content)})")
+
+        # First, try to find TOOL: pattern and extract tool name
         tool_name_patterns = [
             r"TOOL:\s*(\w+)\s*ARGS:\s*",
             r"TOL:\s*(\w+)\s*ARGS:\s*",
@@ -368,12 +382,12 @@ class MiniAgent():
                     if args:
                         logger.info(f"Parsed write tool call with path: {args.get('path', 'unknown')}")
                         return {"name": name, "arguments": args}
-                    
+
                 # Extract balanced JSON using brace counting
                 args_str = self._extract_balanced_json(remaining)
 
                 if args_str:
-                    logger.debug(f"Get Match Tools: {name} with Args: {args_str}")
+                    logger.debug(f"Matched tool '{name}', args length={len(args_str)}")
 
                     # First try strict parsing
                     try:
@@ -441,7 +455,9 @@ class MiniAgent():
 
         # Call tool callback if provided
         if tool_callback:
-            tool_callback(tool_name, "success" if "error" not in str(result) else "error", result)
+            # 兼容 CLI 中的回调格式：event, name, payload
+            tool_callback("status", tool_name, {"arguments": tool_args})
+            tool_callback("end", tool_name, {"result": result})
 
         return result
 
