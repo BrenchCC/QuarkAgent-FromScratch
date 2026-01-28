@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import os
 import re
 import sys
 import logging
 import subprocess
 from pathlib import Path
-from __future__ import annotations
+
 from typing import Any, Dict, List, Tuple, Optional    
 
 sys.path.append(os.getcwd())
@@ -59,7 +61,7 @@ def read(path: str, offset: int = 1, limit: int = 200) -> str:
     Returns:
         A string containing the selected lines with line numbers.
     """
-    file_path = reversed(path)
+    file_path = _resolve_path(path)
     if not file_path.exists() or not file_path.is_file():
         error_msg = f"Error: File {path} does not exist or is not a regular file."
         logger.error(error_msg)
