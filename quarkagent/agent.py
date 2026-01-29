@@ -184,76 +184,84 @@ class QuarkAgent():
     
     def _extract_string_value(self, text: str, quote_char: str) -> Optional[str]:
         """
-        Extract a string value from text, handling escaped quotes
-        
+        Extract a string value from text, properly handling escaped quotes
+
         Args:
             text: Text containing the string value
             quote_char: Quote character used to enclose the string value
-            
+
         Returns:
             Extracted string value if found, None otherwise
         """
-        # Strategy: Find all potential ending positions and pick the best one
-        # A valid ending is: quote + optional whitespace + } or quote + optional whitespace + ,
-
-        # First try: find the last occurrence of "} or "}
-        # This works because JSON object ends with }
-        best_end = -1
+        result = []
         i = 0
-        while i < len(text):
-            if text[i] == '\\' and i + 1 < len(text):
-                i += 2
-                continue
+        n = len(text)
 
-            if text[i] == quote_char:
-                rest = text[i + 1:].strip()
-                if rest.endswith('}') or rest.endswith(',}'):
-                    best_end = i
+        while i < n:
+            char = text[i]
 
-                    # try to validate by checking if remaining text looks like end of JSON
-                    if rest.startswith('}'):
-                        # This looks like a good ending
-                        return text[:i]
-            i += 1
-        
-        # If we found a potential end, use it
-        if best_end > 0:
-            return text[:best_end]
+            if char == '\\':
+                # Handle escaped characters
+                if i + 1 < n:
+                    next_char = text[i + 1]
+                    if next_char == quote_char:
+                        result.append(quote_char)
+                        i += 2
+                    elif next_char == '\\':
+                        result.append('\\')
+                        i += 2
+                    elif next_char == 'n':
+                        result.append('\n')
+                        i += 2
+                    elif next_char == 't':
+                        result.append('\t')
+                        i += 2
+                    else:
+                        # Unknown escape sequence, keep as is
+                        result.append(char)
+                        result.append(next_char)
+                        i += 2
+                else:
+                    # Trailing backslash, treat as regular character
+                    result.append(char)
+                    i += 1
+            elif char == quote_char:
+                # Found closing quote
+                return ''.join(result)
+            else:
+                # Regular character
+                result.append(char)
+                i += 1
 
-        # Fallback: take everything up to the last quote before }
-        last_quote = text.rfind(quote_char)
-        if last_quote > 0:
-            return text[:last_quote]
-
+        # If we reached end of text without finding closing quote
         return None
-    
+
     def _extract_write_args(self, text: str) -> Optional[Dict]:
         """
         Extract arguments for write tool from text
-        
+
         Args:
             text: Text containing write tool arguments
-            
+
         Returns:
             Dictionary of extracted arguments if found, None otherwise
         """
+        # Extract path using regex
         path_match = re.search(r'["\']path["\']\s*:\s*["\']([^"\']+)["\']', text)
         if not path_match:
             return None
-        
+
         path = path_match.group(1)
 
-        # Find content field - look for "content" or 'content' 
+        # Find content field - look for "content" or 'content'
         content_match = re.search(r'["\']content["\']\s*:\s*["\']', text)
         if not content_match:
             return None
-        
+
         content_start = content_match.end()
         quote_char = text[content_start - 1]
 
-        # Find the end of content - look for closing pattern
-        # The content ends with quote + } or quote + , + }
-        # We need to find the LAST occurrence of "} or '}
+        # Extract content with proper escape handling
         content = self._extract_string_value(text[content_start:], quote_char)
 
         if content is not None:

@@ -1,10 +1,10 @@
 # Utils 模块
 
-为 MiniAgent 框架提供的工具函数和类集合。
+为 QuarkAgent 框架提供的工具函数和类集合。
 
 ## 概述
 
-`utils` 模块提供了 MiniAgent 系统中广泛使用的核心辅助功能，包括：
+`utils` 模块提供了 QuarkAgent 系统中广泛使用的核心辅助功能，包括：
 
 - JSON 序列化/反序列化工具
 - 大型语言模型（LLM）相关工具

@@ -28,7 +28,7 @@ def _read_text_file(path: Path) -> str:
         with path.open('r', encoding = 'utf-8') as f:
             return f.read().splitlines()
     except Exception as e:
-        logger.error(f"Error reading file {path}: {e}", exc_info=True)
+        logger.error(f"Error reading file {path}: {e}", exc_info = True)
         return ""
 
 def _write_text_file(path: Path, content: str) -> None:
@@ -38,7 +38,7 @@ def _write_text_file(path: Path, content: str) -> None:
         with path.open('w', encoding = 'utf-8') as f:
             f.write(content)
     except Exception as e:
-        logger.error(f"Error writing file {path}: {e}", exc_info=True)
+        logger.error(f"Error writing file {path}: {e}", exc_info = True)
 
 
 def _iter_files(root: Path) -> List[Path]:

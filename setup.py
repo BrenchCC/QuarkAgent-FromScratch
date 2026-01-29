@@ -45,7 +45,7 @@ setup(
     python_requires = ">=3.8",
     entry_points = {
         "console_scripts": [
-            "miniagent = miniagent.cli:main",
+            "quarkagent = quarkagent.cli:main",
         ]
     },
     keywords = [

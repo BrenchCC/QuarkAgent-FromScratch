@@ -37,7 +37,7 @@ class AgentConfig:
     default_tools: List[str] = field(default_factory = list)
     enable_reflection: bool = False
     reflection_system_prompt: Optional[str] = None
-    reflection_max_iterations: int = 3
+    reflection_max_iterations: int = 5
 
 
 def _load_default_system_prompt() -> str:
