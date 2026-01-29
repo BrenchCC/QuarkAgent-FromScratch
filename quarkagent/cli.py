@@ -6,20 +6,21 @@ import logging
 import argparse
 from typing import Dict, List, Union, Any, Optional
 
+from rich import box
 
 from rich.text import Text
+from rich.emoji import Emoji
 from rich.style import Style
 from rich.panel import Panel
+from rich.align import Align
+from rich.table import Table
 from rich.status import Status
 from rich.prompt import Prompt
 from rich.console import Console
-from rich.markdown import Markdown
-from rich import box
-from rich.align import Align
-from rich.table import Table
 from rich.columns import Columns
+from rich.markdown import Markdown
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.emoji import Emoji
+
 
 sys.path.append(os.getcwd())
 
