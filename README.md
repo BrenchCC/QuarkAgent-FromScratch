@@ -131,8 +131,9 @@ agent.load_builtin_tool("my_tool")
 
 QuarkAgent 的设计思路参考了优秀的 AI Agent 项目，感谢开源社区的贡献！
 
-[MiniAgent](https://github.com/ZhuLinsen/MiniAgent) 
-[nanocode](https://github.com/1rgs/nanocode)
+**Reference**: 
+- [MiniAgent](https://github.com/ZhuLinsen/MiniAgent) 
+- [nanocode](https://github.com/1rgs/nanocode)
 ## 许可证
 
 [MIT License](LICENSE)
