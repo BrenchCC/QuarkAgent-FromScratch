@@ -68,6 +68,7 @@ def main():
         "test_tools.py",
         "test_memory.py",
         "test_config.py",
+        "test_web_api.py",
         "test_cli.py",
         "test_reflector.py"
     ]
