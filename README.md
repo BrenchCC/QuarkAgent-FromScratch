@@ -1,6 +1,6 @@
 # QuarkAgent
 
-🚀 **轻量级 CLI AI 编程助手，从0到1构建！**
+🚀 **轻量级 AI 编程助手（CLI + Web）从0到1构建！**
 
 <div align="center">
   <img src="sources/quarkagent.png" alt="QuarkAgent" width="400"/>
@@ -8,7 +8,7 @@
 
 ## 💡 核心特性
 
-**极简、高效、透明的 CLI Agent 框架**，专为 AI 编程助手设计：
+**极简、高效、透明的 Agent 框架**，专为 AI 编程助手设计：
 
 - 🧠 **智能编程助手**: 像 Claude Code 一样写代码、修复 Bug、运行测试
 - ⚡ **轻量级实现**: 核心逻辑 (`agent.py`) 简洁高效，完全透明可控
@@ -17,6 +17,7 @@
 - 📚 **内置丰富工具**: 提供代码操作、文件管理、系统命令等常用工具
 - 💾 **会话记忆**: 支持会话记忆功能，保持上下文连贯性
 - 🎯 **命令行界面**: 简洁易用的 CLI，快速启动和交互
+- 🌐 **Web 聊天界面**: 新增 `frontend` + `FastAPI` 后端，支持 REST + SSE 实时事件流
 
 ## 快速开始
 
@@ -44,6 +45,52 @@ LLM_API_BASE=https://api.openai.com/v1
 ```bash
 quarkagent          # 或 python -m quarkagent
 ```
+
+## Web 模式（Frontend + FastAPI）
+
+### 1. 启动后端
+
+```bash
+uvicorn app.main:app --reload
+```
+
+默认地址：`http://127.0.0.1:8000`  
+OpenAPI 文档：`http://127.0.0.1:8000/docs`
+
+### 2. 启动前端
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+默认地址：`http://127.0.0.1:5173`
+
+前端可选环境变量（`frontend/.env.local`）：
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+### 3. Web API 列表
+
+- `GET /api/health`
+- `POST /api/sessions`
+- `DELETE /api/sessions/{session_id}`
+- `GET /api/tools`
+- `POST /api/chat`（同步）
+- `POST /api/chat/stream`（SSE）
+
+SSE 事件类型：
+- `status`
+- `tool_start`
+- `tool_end`
+- `final`
+- `error`
+- `done`
+
+前端接口文档：`frontend/docs/api-integration.md`
 
 ## 使用示例
 
@@ -100,6 +147,24 @@ you: 运行一下
 ## 项目结构
 
 ```
+app/                  # FastAPI Web 后端
+├── main.py
+├── settings.py
+├── schemas.py
+├── session_manager.py
+├── agent_service.py
+└── routes/
+    ├── chat.py
+    └── system.py
+frontend/             # React + TypeScript Web 前端
+├── src/
+│   ├── components/
+│   ├── hooks/
+│   ├── lib/
+│   ├── styles/
+│   └── types/
+└── docs/
+    └── api-integration.md
 quarkagent/
 ├── agent.py          # 核心 Agent 类
 ├── cli.py            # 命令行界面
@@ -110,6 +175,22 @@ quarkagent/
 ├── utils/            # 工具函数
 ├── prompts/          # 提示模板
 └── examples/         # 使用示例
+```
+
+## 测试
+
+后端 Web API 测试：
+
+```bash
+python examples/test_web_api.py
+```
+
+前端构建与静态检查：
+
+```bash
+cd frontend
+npm run lint
+npm run build
 ```
 
 ## 自定义工具
