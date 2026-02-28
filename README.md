@@ -48,6 +48,36 @@ quarkagent          # 或 python -m quarkagent
 
 ## Web 模式（Frontend + FastAPI）
 
+### 一条命令同时启动前后端（推荐）
+
+```bash
+bash scripts/dev-web.sh
+```
+
+可选参数（环境变量）：
+
+```bash
+CONDA_ENV=quarkagent BACKEND_PORT=8000 FRONTEND_PORT=5173 bash scripts/dev-web.sh
+```
+
+使用 venv 启动后端：
+
+```bash
+PY_ENV_MODE=venv VENV_PATH=.venv bash scripts/dev-web.sh
+```
+
+自动选择 Python 环境（优先 conda，其次 venv）：
+
+```bash
+PY_ENV_MODE=auto CONDA_ENV=quarkagent VENV_PATH=.venv bash scripts/dev-web.sh
+```
+
+如需自动使用本地代理（127.0.0.1:1088）：
+
+```bash
+USE_LOCAL_PROXY=1 bash scripts/dev-web.sh
+```
+
 ### 1. 启动后端
 
 ```bash

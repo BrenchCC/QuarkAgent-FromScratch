@@ -215,4 +215,8 @@ CLAUDE.md
 .claude
 .omc
 .omx
+
+# Node / Frontend build artifacts
+node_modules/
+frontend/dist/
 .codex-planning
