@@ -28,15 +28,18 @@ class Args(argparse.Namespace):
 
 
 def _request(url: str) -> bytes:
-    return github_request(url, "codex-skill-list")
+    return github_request(url, "quarkagent-skill-list")
 
 
-def _codex_home() -> str:
-    return os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex"))
+def _quarkagent_home() -> str:
+    return os.environ.get(
+        "QUARKAGENT_HOME",
+        os.environ.get("CODEX_HOME", os.path.expanduser("~/.quarkagent"))
+    )
 
 
 def _installed_skills() -> set[str]:
-    root = os.path.join(_codex_home(), "skills")
+    root = os.path.join(_quarkagent_home(), "skills")
     if not os.path.isdir(root):
         return set()
     entries = set()
