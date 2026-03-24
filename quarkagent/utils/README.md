@@ -8,7 +8,7 @@
 
 - JSON 序列化/反序列化工具
 - 大型语言模型（LLM）相关工具
-- 反射和自我批评功能
+- 反思和自我批评功能
 - 其他通用工具函数
 
 ## 模块说明
@@ -45,7 +45,7 @@ LLM 相关的工具函数包括：
 ### Reflector 使用
 
 ```python
-from miniagent.utils.reflector import Reflector
+from quarkagent.utils.reflector import Reflector
 
 # 使用 LLM 客户端初始化反射器
 reflector = Reflector(client=llm_client, model="gpt-4")
@@ -57,7 +57,7 @@ improved_messages = reflector.apply_reflection(messages)
 ### JSON 工具使用
 
 ```python
-from miniagent.utils.json_util import safe_json_dump, safe_json_load
+from quarkagent.utils.json_util import safe_json_dump, safe_json_load
 
 # 安全的 JSON 序列化
 with open("data.json", "w") as f:
