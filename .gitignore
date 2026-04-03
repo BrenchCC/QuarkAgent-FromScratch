@@ -220,3 +220,4 @@ CLAUDE.md
 node_modules/
 frontend/dist/
 .codex-planning
+memory/*.json
