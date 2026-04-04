@@ -232,6 +232,18 @@ body {
   color: var(--text-main);
 }
 
+.composer-hint {
+  grid-column: 1 / -1;
+  margin: -0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.composer-hint code {
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--accent-red);
+}
+
 .composer button,
 .actions button {
   border: 1px solid #8d7552;

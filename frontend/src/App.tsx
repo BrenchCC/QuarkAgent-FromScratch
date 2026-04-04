@@ -49,8 +49,8 @@ export default function App() {
             <button type="button" onClick={clearConversation} disabled={isStreaming}>
               Clear Conversation
             </button>
-            <button type="button" onClick={cancelStreaming} disabled={!isStreaming}>
-              Cancel Stream
+            <button type="button" onClick={() => void cancelStreaming()} disabled={!isStreaming}>
+              Stop Session
             </button>
           </div>
         </section>

@@ -11,8 +11,25 @@ export interface SessionDeleteResponse {
   deleted: boolean;
 }
 
+export interface SessionStopResponse {
+  session_id: string;
+  stop_requested: boolean;
+}
+
 export interface ToolListResponse {
   tools: string[];
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  namespace: string;
+  path: string;
+  enabled: boolean;
+}
+
+export interface SkillListResponse {
+  skills: SkillInfo[];
 }
 
 export interface ChatRequest {

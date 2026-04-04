@@ -55,11 +55,36 @@ Example response:
 Example response:
 ```json
 {
-  "tools": ["read", "write", "bash", "calculator"]
+  "tools": ["read", "write", "bash", "calculator", "skills"]
 }
 ```
 
-### 5) Sync Chat
+### 5) List Available Skills
+- `GET /api/skills`
+
+Example response:
+```json
+{
+  "skills": [
+    {
+      "name": "docx",
+      "description": "Default docx skill",
+      "namespace": "system",
+      "path": "skills/system/docx",
+      "enabled": true
+    },
+    {
+      "name": "demo-skill",
+      "description": "Custom demo skill",
+      "namespace": "custom",
+      "path": "skills/custom/demo-skill",
+      "enabled": false
+    }
+  ]
+}
+```
+
+### 6) Sync Chat
 - `POST /api/chat`
 - Body:
 ```json
@@ -71,7 +96,7 @@ Example response:
 ```
 - Returns full answer + captured events.
 
-### 6) Streaming Chat (SSE)
+### 7) Streaming Chat (SSE)
 - `POST /api/chat/stream`
 - Body same as `/api/chat`
 - Header: `Accept: text/event-stream`

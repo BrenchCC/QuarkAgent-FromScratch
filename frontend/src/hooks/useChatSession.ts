@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { createSession, streamChat } from "../lib/api";
+import { createSession, stopSession, streamChat } from "../lib/api";
 import type { ChatMessage, StreamEvent, TimelineEvent } from "../types/api";
 
 interface UseChatSessionReturn {
@@ -14,7 +14,7 @@ interface UseChatSessionReturn {
   sendMessage: (message: string) => Promise<void>;
   refreshSession: () => Promise<string>;
   clearConversation: () => void;
-  cancelStreaming: () => void;
+  cancelStreaming: () => Promise<void>;
 }
 
 function createMessageId(): string {
@@ -48,6 +48,7 @@ export function useChatSession(): UseChatSessionReturn {
   const [statusText, setStatusText] = useState<string>("等待输入");
   const [error, setError] = useState<string>("");
   const abortControllerRef = useRef<AbortController | null>(null);
+  const stopRequestedRef = useRef<boolean>(false);
 
   const appendTimelineEvent = useCallback((event: StreamEvent): void => {
     setTimeline((previous) => [createTimelineEvent(event), ...previous].slice(0, 100));
@@ -90,14 +91,28 @@ export function useChatSession(): UseChatSessionReturn {
     setError("");
   }, []);
 
-  const cancelStreaming = useCallback((): void => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
-      setIsStreaming(false);
-      setStatusText("已取消");
+  const cancelStreaming = useCallback(async (): Promise<void> => {
+    if (!sessionId || !abortControllerRef.current || !isStreaming) {
+      return;
     }
-  }, []);
+
+    stopRequestedRef.current = true;
+    setStatusText("停止中");
+
+    try {
+      await stopSession(sessionId);
+    } catch (stopError) {
+      const nextError = stopError instanceof Error ? stopError.message : "Failed to stop session.";
+      setError(nextError);
+    } finally {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      setIsStreaming(false);
+      setStatusText("会话已停止");
+    }
+  }, [isStreaming, sessionId]);
 
   const sendMessage = useCallback(async (message: string): Promise<void> => {
     const trimmedMessage = message.trim();
@@ -118,6 +133,7 @@ export function useChatSession(): UseChatSessionReturn {
     setIsStreaming(true);
     setError("");
     setStatusText("准备发送");
+    stopRequestedRef.current = false;
 
     appendMessage("user", trimmedMessage);
 
@@ -173,7 +189,9 @@ export function useChatSession(): UseChatSessionReturn {
       });
     } catch (streamError) {
       const isAbortError = streamError instanceof DOMException && streamError.name === "AbortError";
-      if (!isAbortError) {
+      if (isAbortError && stopRequestedRef.current) {
+        setStatusText("会话已停止");
+      } else if (!isAbortError) {
         const nextError = streamError instanceof Error ? streamError.message : "Streaming request failed.";
         setError(nextError);
         setStatusText("连接失败");
@@ -181,6 +199,7 @@ export function useChatSession(): UseChatSessionReturn {
     } finally {
       abortControllerRef.current = null;
       setIsStreaming(false);
+      stopRequestedRef.current = false;
     }
   }, [appendMessage, appendTimelineEvent, isStreaming, refreshSession, sessionId]);
 
