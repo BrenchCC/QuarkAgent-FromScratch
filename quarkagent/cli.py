@@ -4,29 +4,30 @@ import os
 import sys
 import logging
 import argparse
-from typing import Dict, List, Union, Any, Optional
+import threading
+
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from rich import box
 
-from rich.text import Text
-from rich.emoji import Emoji
-from rich.style import Style
 from rich.panel import Panel
 from rich.align import Align
 from rich.table import Table
 from rich.status import Status
 from rich.prompt import Prompt
 from rich.console import Console
-from rich.columns import Columns
 from rich.markdown import Markdown
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 
 sys.path.append(os.getcwd())
 
-from quarkagent.memory import Memory
+from quarkagent.memory import Memory, MemorySummary, list_memory_summaries
 from quarkagent.agent import QuarkAgent
-from quarkagent.config import load_config,save_config
+from quarkagent.config import load_config, save_config
+from quarkagent.subagent import build_subagent_tool
+from quarkagent.skills import SkillCommandResult, SkillManager, build_skill_command_response
 
 logger = logging.getLogger("QuarkAgent")
 
@@ -51,6 +52,153 @@ STYLES = {
     "text": "white",
     "dim": "dim white"
 }
+
+
+class EscapeStopMonitor:
+    """
+    Listen for the `Esc` key while the agent is generating.
+
+    Args:
+        None.
+    """
+
+    def __init__(self):
+        """
+        Initialize the stop monitor state.
+
+        Args:
+            None.
+        """
+        self._stop_event = threading.Event()
+        self._shutdown_event = threading.Event()
+        self._listener_thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        """
+        Start the keyboard listener when stdin is interactive.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        if not sys.stdin.isatty() or self._listener_thread:
+            return
+
+        self._stop_event.clear()
+        self._shutdown_event.clear()
+        self._listener_thread = threading.Thread(target = self._listen_for_escape, daemon = True)
+        self._listener_thread.start()
+
+    def stop(self) -> None:
+        """
+        Stop the keyboard listener and restore stdin state.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        self._shutdown_event.set()
+        if self._listener_thread and self._listener_thread.is_alive():
+            self._listener_thread.join(timeout = 0.5)
+        self._listener_thread = None
+
+    def is_stop_requested(self) -> bool:
+        """
+        Check whether the user requested a stop.
+
+        Args:
+            None.
+
+        Returns:
+            Whether stop has been requested.
+        """
+        return self._stop_event.is_set()
+
+    def _listen_for_escape(self) -> None:
+        """
+        Dispatch to the platform-specific keyboard listener.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        if os.name == "nt":
+            self._listen_windows()
+            return
+
+        self._listen_posix()
+
+    def _listen_windows(self) -> None:
+        """
+        Listen for `Esc` on Windows terminals.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        try:
+            import msvcrt
+        except ImportError:
+            return
+
+        while not self._shutdown_event.is_set():
+            if not msvcrt.kbhit():
+                self._shutdown_event.wait(timeout = 0.1)
+                continue
+
+            char = msvcrt.getwch()
+            if char == "\x1b":
+                self._stop_event.set()
+                return
+
+    def _listen_posix(self) -> None:
+        """
+        Listen for `Esc` on POSIX terminals.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        try:
+            import select
+            import termios
+            import tty
+        except ImportError:
+            return
+
+        fd = sys.stdin.fileno()
+
+        try:
+            original_settings = termios.tcgetattr(fd)
+        except termios.error:
+            return
+
+        try:
+            tty.setcbreak(fd)
+            while not self._shutdown_event.is_set():
+                readable, _, _ = select.select([fd], [], [], 0.1)
+                if not readable:
+                    continue
+
+                char = os.read(fd, 1).decode("utf-8", errors = "ignore")
+                if char == "\x1b":
+                    self._stop_event.set()
+                    return
+        finally:
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, original_settings)
+            except termios.error:
+                return
 
 def _format_history(history: List[Dict[str, str]], limit_turns: int = 10) -> str:
     """
@@ -221,6 +369,229 @@ def _tool_callback(event: str, name: str, payload: Dict[str, Any]) -> None:
         if CURRENT_STATUS:
            CURRENT_STATUS.start()
 
+
+def _render_skill_command_result(result: SkillCommandResult) -> None:
+    """
+    Render a shared local skill command result in the CLI.
+
+    Args:
+        result: Shared skill command response payload.
+
+    Returns:
+        None.
+    """
+    style = STYLES["primary"]
+    if result.status in {"not_found", "unavailable"}:
+        style = STYLES["error"] if result.status == "not_found" else STYLES["warning"]
+
+    console.print(
+        Panel(
+            Markdown(result.body),
+            title = result.title,
+            style = style,
+            border_style = style,
+            box = box.ROUNDED,
+            padding = (1, 2),
+        )
+    )
+
+
+def _format_memory_timestamp(updated_at: Optional[int]) -> str:
+    """
+    Format a memory summary timestamp for CLI display.
+
+    Args:
+        updated_at: Unix timestamp in seconds.
+
+    Returns:
+        Human-readable timestamp.
+    """
+    if not updated_at:
+        return "-"
+
+    try:
+        return datetime.fromtimestamp(updated_at).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "-"
+
+
+def _build_memory_table(
+    title: str,
+    summaries: List[MemorySummary],
+    current_memory: Optional[Memory] = None,
+    include_load_hint: bool = False,
+    include_task_id: bool = False
+) -> Table:
+    """
+    Build a Rich table for one memory scope.
+
+    Args:
+        title: Table title.
+        summaries: Memory summary items.
+        current_memory: Optional current active memory instance.
+        include_load_hint: Whether to show CLI load hints.
+        include_task_id: Whether to show task IDs for tracked subagent sessions.
+
+    Returns:
+        Rendered table instance.
+    """
+    table = Table(title = title, box = box.ROUNDED, style = STYLES["border"])
+    table.add_column("Index", style = STYLES["primary"], justify = "right")
+    table.add_column("Updated", style = STYLES["text"])
+    table.add_column("Msgs", style = STYLES["text"], justify = "right")
+
+    if include_load_hint:
+        table.add_column("Load", style = STYLES["accent"])
+    if include_task_id:
+        table.add_column("Task ID", style = STYLES["accent"])
+
+    table.add_column("Note", style = STYLES["text"])
+    table.add_column("File", style = STYLES["dim"])
+
+    current_path = str(current_memory.path) if current_memory else ""
+
+    if not summaries:
+        empty_row = ["-", "-", "-"]
+        if include_load_hint:
+            empty_row.append("-")
+        if include_task_id:
+            empty_row.append("-")
+        empty_row.extend(["No saved sessions yet", "-"])
+        table.add_row(*empty_row)
+        return table
+
+    for summary in summaries:
+        note = "Legacy main log" if summary.is_legacy else ""
+        if summary.delegated_task:
+            note = _truncate_str(summary.delegated_task, 48)
+        elif summary.last_message:
+            note = _truncate_str(summary.last_message.replace("\n", " "), 48)
+
+        if current_path and str(summary.path) == current_path:
+            note = (note + " | current").strip(" |")
+
+        row = [
+            str(summary.index),
+            _format_memory_timestamp(summary.updated_at),
+            str(summary.message_count),
+        ]
+
+        if include_load_hint:
+            row.append(f"--load {summary.index}")
+        if include_task_id:
+            row.append(summary.task_id or "-")
+
+        row.extend(
+            [
+                note or "-",
+                summary.path.name,
+            ]
+        )
+        table.add_row(*row)
+
+    return table
+
+
+def _render_memory_command(
+    current_memory: Memory,
+    command_text: str
+) -> bool:
+    """
+    Render local `/memory` command output without invoking the LLM.
+
+    Args:
+        current_memory: Current main-session memory instance.
+        command_text: Raw user command text.
+
+    Returns:
+        Whether the command was handled.
+    """
+    normalized_command = command_text.strip()
+    if not normalized_command:
+        return False
+
+    command_name = normalized_command.split(maxsplit = 1)[0]
+    if command_name != "/memory":
+        return False
+
+    parts = normalized_command.split(maxsplit = 1)
+    requested_scope = "all"
+    if len(parts) == 2:
+        requested_scope = parts[1].strip().lower()
+
+    valid_scopes = {"all", "main", "subagent"}
+    if requested_scope not in valid_scopes:
+        console.print(
+            Panel(
+                Markdown("Usage: `/memory`, `/memory main`, `/memory subagent`"),
+                title = "Memory",
+                style = STYLES["error"],
+                border_style = STYLES["error"],
+                box = box.ROUNDED,
+                padding = (1, 2),
+            )
+        )
+        console.print()
+        return True
+
+    header_lines = [
+        f"Current main session path: `{current_memory.path}`",
+        "Use `--load N` to resume one saved main session.",
+        "Subagent sessions are persisted separately under the `subagent` scope.",
+    ]
+    console.print(
+        Panel(
+            Markdown("\n".join(header_lines)),
+            title = "Memory Overview",
+            style = STYLES["primary"],
+            border_style = STYLES["primary"],
+            box = box.ROUNDED,
+            padding = (1, 2),
+        )
+    )
+
+    if requested_scope in {"all", "main"}:
+        console.print(
+            _build_memory_table(
+                "Saved Main Sessions",
+                list_memory_summaries(agent_scope = "main"),
+                current_memory = current_memory,
+                include_load_hint = True,
+            )
+        )
+        console.print()
+
+    if requested_scope in {"all", "subagent"}:
+        subagent_summaries = list_memory_summaries(agent_scope = "subagent")
+        console.print(
+            _build_memory_table(
+                "Saved Subagent Sessions",
+                subagent_summaries,
+                include_task_id = True,
+            )
+        )
+        console.print()
+
+        delegated_lines = [
+            f"{summary.index}. {summary.task_id or '-'} | {summary.delegated_task}"
+            for summary in subagent_summaries
+            if summary.delegated_task
+        ]
+        if delegated_lines:
+            console.print(
+                Panel(
+                    Markdown("\n".join(delegated_lines)),
+                    title = "Recent Delegated Tasks",
+                    style = STYLES["secondary"],
+                    border_style = STYLES["secondary"],
+                    box = box.ROUNDED,
+                    padding = (1, 2),
+                )
+            )
+            console.print()
+
+    return True
+
 def _build_agent(args: argparse.Namespace) -> tuple[QuarkAgent, Memory]:
     """
     Build the QuarkAgent instance with the given arguments.
@@ -232,6 +603,7 @@ def _build_agent(args: argparse.Namespace) -> tuple[QuarkAgent, Memory]:
         Tuple of (QuarkAgent instance, Memory instance)
     """
     cfg = load_config(args.config)
+    runtime_config_path = Path(".quarkagent/configs/config.json")
 
     model = args.model or cfg.llm.model_name
     api_key = args.api_key or cfg.llm.api_key
@@ -255,15 +627,24 @@ def _build_agent(args: argparse.Namespace) -> tuple[QuarkAgent, Memory]:
         raise SystemExit("Missing API key. Set LLM_API_KEY or pass --api-key.")
 
     if args.load:
-        memory = Memory.from_index(args.load)
+        memory = Memory.from_index(args.load, agent_scope = "main")
     else:
-        memory = Memory()
+        memory = Memory(agent_scope = "main")
     memory.load()
 
     system_prompt = cfg.system_prompt
-    mem_ctx = memory.context()
-    if mem_ctx:
-        system_prompt = system_prompt.rstrip() + "\n\n" + mem_ctx
+
+    def build_memory_context(query: Optional[str] = None) -> str:
+        """
+        Render contextual memory for the current user turn.
+
+        Args:
+            query: Optional current user query string.
+
+        Returns:
+            Rendered memory context text.
+        """
+        return memory.context(query = query)
 
     # Determine whether to use reflector
     use_reflector = cfg.enable_reflection
@@ -272,6 +653,14 @@ def _build_agent(args: argparse.Namespace) -> tuple[QuarkAgent, Memory]:
     if args.no_reflect:
         use_reflector = False
 
+    skill_manager = SkillManager(
+        system_skills_dir = cfg.system_skills_dir,
+        custom_skills_dir = cfg.custom_skills_dir,
+        default_system_skills = cfg.default_system_skills,
+        enable_system_skills = cfg.enable_system_skills,
+        enable_custom_skill_tool = cfg.enable_custom_skill_tool,
+    )
+
     agent = QuarkAgent(
         model = model,
         api_key = api_key,
@@ -279,19 +668,57 @@ def _build_agent(args: argparse.Namespace) -> tuple[QuarkAgent, Memory]:
         temperature = temperature,
         top_p = top_p,
         system_prompt = system_prompt,
+        system_skills = skill_manager.get_enabled_system_skills(),
+        skill_manager = skill_manager,
+        model_identifier = cfg.llm.model_identifier,
         use_reflector = use_reflector,
+        memory_context_provider = build_memory_context,
     )
-    logger.info(f"Using model: {model}, temperature: {temperature}, top_p: {top_p}")
+    agent.agent_scope = memory.agent_scope
+    agent.memory_path = str(memory.path)
+    logger.info(
+        f"Using request model: {model}, "
+        f"model identifier: {cfg.llm.model_identifier}, "
+        f"temperature: {temperature}, top_p: {top_p}"
+    )
     # Load some default tools if configured, else fall back to all currently registered.
     agent.tools = []
     tools = cfg.default_tools or agent.get_available_tools()
     for tool_name in tools:
+        if tool_name == "skills":
+            continue
         agent.load_builtin_tool(tool_name)
+
+    if cfg.enable_custom_skill_tool:
+        agent.add_tool(skill_manager.build_skills_tool())
+
+    if cfg.enable_subagent_tool:
+        agent.add_tool(
+            build_subagent_tool(
+                agent,
+                default_max_iterations = cfg.subagent_max_iterations,
+            )
+        )
+
+    runtime_tool_names = [tool["name"] for tool in agent.tools]
+    runtime_skill_payloads = skill_manager.list_skill_payloads()
+    runtime_prompt_snapshot = agent.build_runtime_snapshot_prompt()
+    memory.set_runtime_state(
+        system_prompt = runtime_prompt_snapshot,
+        tools = runtime_tool_names,
+        skills = runtime_skill_payloads,
+    )
     
     if args.config:
         save_config(cfg, args.config)
     else:
-        save_config(cfg, ".quarkagent/configs/config.json")
+        save_config(
+            cfg,
+            str(runtime_config_path),
+            system_prompt_override = runtime_prompt_snapshot,
+            tools_override = runtime_tool_names,
+            skills_override = runtime_skill_payloads,
+        )
     return agent, memory
 
 def args_parse():
@@ -326,7 +753,8 @@ def main():
             f"[bold {STYLES['header']}]🚀 QuarkAgent[/bold {STYLES['header']}]\n"
             f"[dim {STYLES['text']}]Interactive AI Assistant[/dim {STYLES['text']}]\n\n"
             f"[dim {STYLES['text']}]cwd:[/dim {STYLES['text']}] {os.getcwd()}\n"
-            f"[dim {STYLES['text']}]commands:[/dim {STYLES['text']}] /help /c /q"
+            f"[dim {STYLES['text']}]commands:[/dim {STYLES['text']}] /help /skills /memory /c /q\n"
+            f"[dim {STYLES['text']}]runtime:[/dim {STYLES['text']}] press Esc to stop the current response"
         ),
         style = STYLES["border"],
         border_style = STYLES["border"],
@@ -361,18 +789,36 @@ def main():
             help_table.add_column("Command", style = STYLES["primary"], justify = "left")
             help_table.add_column("Description", style = STYLES["text"], justify = "left")
             help_table.add_row("/help", "Show this help message")
+            help_table.add_row("/skills", "Show the current system/custom skills and usage")
+            help_table.add_row("/skills <name>", "Show the full detail for one skill")
+            help_table.add_row("$skills <name>", "Alias for `/skills <name>`")
+            help_table.add_row("/memory", "Show saved main/subagent sessions")
+            help_table.add_row("/memory <scope>", "Show one scope: `main` or `subagent`")
             help_table.add_row("/c", "Clear conversation history")
             help_table.add_row("/q", "Quit the application")
+            help_table.add_row("Esc", "Stop the current response after the active step completes")
             console.print(help_table)
             console.print()
+            continue
+
+        skill_command_result = build_skill_command_response(agent.skill_manager, user_text)
+        if skill_command_result:
+            _render_skill_command_result(skill_command_result)
+            console.print()
+            continue
+
+        if _render_memory_command(memory, user_text):
             continue
 
         history.append({"role": "user", "content": user_text})
         memory.push("user", user_text)
 
-        query = _format_history(history) + user_text
+        query = (_format_history(history[:-1]) or "") + user_text
 
+        stop_monitor = EscapeStopMonitor()
         try:
+            stop_monitor.start()
+
             # Enhanced thinking indicator
             with console.status(
                 f"[bold {STYLES['primary']}]🤔 Thinking...[/bold {STYLES['primary']}]",
@@ -385,7 +831,8 @@ def main():
                     response = agent.run_with_tools(
                         query,
                         tool_callback = _tool_callback,
-                        status_callback = _status_callback
+                        status_callback = _status_callback,
+                        stop_callback = stop_monitor.is_stop_requested,
                     )
                 finally:
                     CURRENT_STATUS = None
@@ -403,6 +850,8 @@ def main():
             console.print(error_panel)
             console.print()
             continue
+        finally:
+            stop_monitor.stop()
 
         history.append({"role": "assistant", "content": response})
         memory.push("assistant", response)

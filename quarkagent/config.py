@@ -13,10 +13,72 @@ logger = logging.getLogger("QuarkAgent_Config")
 load_dotenv()
 
 
+def _parse_csv_items(csv_text: str) -> List[str]:
+    """
+    Parse a comma-separated string into a normalized list.
+
+    Args:
+        csv_text: Comma-separated string value.
+
+    Returns:
+        List of stripped non-empty items.
+    """
+    return [item.strip() for item in csv_text.split(",") if item.strip()]
+
+
+def _parse_bool_env(
+    env_name: str,
+    default: bool
+) -> bool:
+    """
+    Parse a boolean environment variable with a default fallback.
+
+    Args:
+        env_name: Environment variable name.
+        default: Default value when the variable is not set.
+
+    Returns:
+        Parsed boolean value.
+    """
+    raw_value = os.getenv(env_name)
+    if raw_value is None:
+        return default
+    return raw_value.lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_model_name(default: Optional[str] = "gpt-3.5-turbo") -> Optional[str]:
+    """
+    Resolve model name from supported environment variables.
+
+    Args:
+        default: Fallback model name if no environment variable is set.
+
+    Returns:
+        Resolved model name or the provided default.
+    """
+    explicit_model = os.getenv("LLM_MODEL") or os.getenv("LLM_MODEL_NAME")
+    return explicit_model or default
+
+
+def _load_model_identifier() -> Optional[str]:
+    """
+    Load the optional display identifier for the configured model.
+
+    Args:
+        None.
+
+    Returns:
+        Model identifier if configured, otherwise `None`.
+    """
+    identifier = os.getenv("LLM_IDENTIFIER", "").strip()
+    return identifier or None
+
+
 @dataclass
 class LLMConfig:
     """LLM Configuration"""
-    model_name: str = field(default_factory = lambda: os.getenv("LLM_MODEL_NAME", "gpt-3.5-turbo"))
+    model_name: str = field(default_factory = lambda: _resolve_model_name("gpt-3.5-turbo"))
+    model_identifier: Optional[str] = field(default_factory = _load_model_identifier)
     api_key: str = field(default_factory = lambda: os.getenv("LLM_API_KEY", ""))
     api_base: str = field(default_factory = lambda: os.getenv("LLM_API_BASE", "https://api.openai.com/v1"))
     organization: Optional[str] = None
@@ -35,6 +97,14 @@ class AgentConfig:
     llm: LLMConfig = field(default_factory = LLMConfig)
     system_prompt: str = field(default_factory = lambda: _load_default_system_prompt())
     default_tools: List[str] = field(default_factory = list)
+    skills_root_dir: str = field(default_factory = lambda: os.getenv("SKILLS_ROOT_DIR", "skills"))
+    system_skills_dir: str = field(default_factory = lambda: os.getenv("SYSTEM_SKILLS_DIR", "skills/system"))
+    custom_skills_dir: str = field(default_factory = lambda: os.getenv("CUSTOM_SKILLS_DIR", "skills/custom"))
+    default_system_skills: List[str] = field(default_factory = lambda: _parse_csv_items(os.getenv("DEFAULT_SYSTEM_SKILLS", "")))
+    enable_system_skills: bool = field(default_factory = lambda: _parse_bool_env("ENABLE_SYSTEM_SKILLS", True))
+    enable_custom_skill_tool: bool = field(default_factory = lambda: _parse_bool_env("ENABLE_CUSTOM_SKILL_TOOL", True))
+    enable_subagent_tool: bool = field(default_factory = lambda: _parse_bool_env("ENABLE_SUBAGENT_TOOL", True))
+    subagent_max_iterations: int = field(default_factory = lambda: int(os.getenv("SUBAGENT_MAX_ITERATIONS", "5")))
     enable_reflection: bool = False
     reflection_system_prompt: Optional[str] = None
     reflection_max_iterations: int = 5
@@ -100,9 +170,13 @@ def load_config(config_path: Optional[str] = None) -> AgentConfig:
         config.llm.organization = env_organization
 
     # Try to get model from environment variables
-    env_model = os.environ.get("LLM_MODEL")
+    env_model = _resolve_model_name(None)
     if env_model:
         config.llm.model_name = env_model
+
+    env_model_identifier = _load_model_identifier()
+    if env_model_identifier:
+        config.llm.model_identifier = env_model_identifier
 
     # Determine likely provider based on API_BASE and set appropriate default model
     if config.llm.api_base:
@@ -143,13 +217,23 @@ def load_config(config_path: Optional[str] = None) -> AgentConfig:
     return config
 
 
-def save_config(config: AgentConfig, config_path: str) -> bool:
+def save_config(
+    config: AgentConfig,
+    config_path: str,
+    system_prompt_override: Optional[str] = None,
+    tools_override: Optional[List[str]] = None,
+    skills_override: Optional[List[Dict[str, Any]]] = None
+) -> bool:
     """
     Save configuration to file
 
     Args:
         config: Agent configuration object
         config_path: Configuration file path
+        system_prompt_override: Optional resolved system prompt to persist in place
+            of `config.system_prompt`
+        tools_override: Optional resolved runtime tool list to persist
+        skills_override: Optional resolved runtime skill payloads to persist
 
     Returns:
         Whether save was successful
@@ -161,8 +245,18 @@ def save_config(config: AgentConfig, config_path: str) -> bool:
                 key: value for key, value in config.llm.__dict__.items()
                 if not key.startswith("_") and value is not None
             },
-            "system_prompt": config.system_prompt,
+            "system_prompt": system_prompt_override if system_prompt_override is not None else config.system_prompt,
+            "tools": tools_override if tools_override is not None else config.default_tools,
+            "skills": skills_override if skills_override is not None else [],
             "default_tools": config.default_tools,
+            "skills_root_dir": config.skills_root_dir,
+            "system_skills_dir": config.system_skills_dir,
+            "custom_skills_dir": config.custom_skills_dir,
+            "default_system_skills": config.default_system_skills,
+            "enable_system_skills": config.enable_system_skills,
+            "enable_custom_skill_tool": config.enable_custom_skill_tool,
+            "enable_subagent_tool": config.enable_subagent_tool,
+            "subagent_max_iterations": config.subagent_max_iterations,
             "enable_reflection": config.enable_reflection,
             "reflection_system_prompt": config.reflection_system_prompt,
             "reflection_max_iterations": config.reflection_max_iterations
