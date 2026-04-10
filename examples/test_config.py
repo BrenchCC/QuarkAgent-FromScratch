@@ -9,6 +9,7 @@ import json
 import logging
 sys.path.append(os.getcwd())
 
+from app.settings import AppSettings
 from quarkagent.config import load_config, save_config, AgentConfig, LLMConfig
 
 # Configure logging
@@ -21,6 +22,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def pop_environment(keys):
+    """Remove environment variables and return their previous values."""
+    previous_values = {}
+    for key in keys:
+        if key in os.environ:
+            previous_values[key] = os.environ.pop(key)
+    return previous_values
+
+
+def restore_environment(values):
+    """Restore environment variables from a saved mapping."""
+    for key, value in values.items():
+        os.environ[key] = value
+
+
 def test_default_config():
     """Test default configuration"""
     logger.info("=" * 80)
@@ -28,6 +44,24 @@ def test_default_config():
     logger.info("=" * 80)
 
     try:
+        cleared_values = pop_environment(
+            [
+                "LLM_MODEL",
+                "LLM_IDENTIFIER",
+                "LLM_MODEL_NAME",
+                "LLM_API_KEY",
+                "OPENAI_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "AZURE_OPENAI_API_KEY",
+                "LLM_API_BASE",
+                "OPENAI_API_BASE",
+                "DEEPSEEK_API_BASE",
+                "ANTHROPIC_API_BASE",
+                "AZURE_OPENAI_ENDPOINT",
+            ]
+        )
+
         # Load default config
         config = load_config()
         logger.info("✓ Default configuration loaded successfully")
@@ -42,6 +76,13 @@ def test_default_config():
         # Verify agent config
         assert isinstance(config, AgentConfig), "Config should be instance of AgentConfig"
         assert len(config.default_tools) == 0, f"Default tools should be empty, got {len(config.default_tools)}"
+        assert config.system_skills_dir == "skills/system", f"Unexpected system skills dir: {config.system_skills_dir}"
+        assert config.custom_skills_dir == "skills/custom", f"Unexpected custom skills dir: {config.custom_skills_dir}"
+        assert config.default_system_skills == [], f"Default system skills should be empty, got {config.default_system_skills}"
+        assert config.enable_system_skills is True, "System skills should be enabled by default"
+        assert config.enable_custom_skill_tool is True, "Custom skill tool should be enabled by default"
+        assert config.enable_subagent_tool is True, "Subagent tool should be enabled by default"
+        assert config.subagent_max_iterations == 5, f"Unexpected subagent max iterations: {config.subagent_max_iterations}"
         assert config.enable_reflection is False, f"Reflection should be disabled by default, got {config.enable_reflection}"
         logger.info("✓ Agent default configuration correct")
 
@@ -51,6 +92,8 @@ def test_default_config():
     except Exception as e:
         logger.error(f"✗ Default configuration test failed: {e}")
         return False
+    finally:
+        restore_environment(locals().get("cleared_values", {}))
 
 
 def test_config_save_load():
@@ -70,6 +113,10 @@ def test_config_save_load():
         config.llm.temperature = 0.3
         config.llm.top_p = 0.8
         config.default_tools = ["read", "write", "calculator"]
+        config.default_system_skills = ["docx", "pdf"]
+        config.enable_custom_skill_tool = False
+        config.enable_subagent_tool = False
+        config.subagent_max_iterations = 3
         config.enable_reflection = True
 
         save_success = save_config(config, temp_filename)
@@ -85,6 +132,10 @@ def test_config_save_load():
         assert loaded_config.llm.temperature == 0.3, "Temperature mismatch"
         assert loaded_config.llm.top_p == 0.8, "Top_p mismatch"
         assert loaded_config.default_tools == ["read", "write", "calculator"], "Default tools mismatch"
+        assert loaded_config.default_system_skills == ["docx", "pdf"], "Default system skills mismatch"
+        assert loaded_config.enable_custom_skill_tool is False, "Custom skill tool flag mismatch"
+        assert loaded_config.enable_subagent_tool is False, "Subagent tool flag mismatch"
+        assert loaded_config.subagent_max_iterations == 3, "Subagent max iterations mismatch"
         assert loaded_config.enable_reflection is True, "Reflection flag mismatch"
         logger.info("✓ Loaded configuration matches saved configuration")
 
@@ -144,11 +195,48 @@ def test_env_variable_loading():
         return False
 
 
+def test_identifier_env_loading():
+    """Test endpoint-style request models keep LLM_IDENTIFIER as metadata."""
+    logger.info("\n" + "-" * 60)
+    logger.info("Testing LLM_IDENTIFIER Environment Loading")
+    logger.info("-" * 60)
+
+    cleared_values = pop_environment(
+        [
+            "LLM_MODEL",
+            "LLM_MODEL_NAME",
+            "LLM_IDENTIFIER",
+        ]
+    )
+
+    try:
+        os.environ["LLM_MODEL"] = "ep-20260319-demo"
+        os.environ["LLM_IDENTIFIER"] = "Doubao-Seed-2.0-Pro"
+
+        config = load_config()
+        settings = AppSettings()
+
+        assert config.llm.model_name == "ep-20260319-demo", "Config should keep the endpoint model for requests"
+        assert config.llm.model_identifier == "Doubao-Seed-2.0-Pro", "Config should expose LLM_IDENTIFIER separately"
+        assert settings.llm_model == "ep-20260319-demo", "Web settings should keep the endpoint model for requests"
+        assert settings.llm_identifier == "Doubao-Seed-2.0-Pro", "Web settings should expose LLM_IDENTIFIER separately"
+        logger.info("✓ Endpoint-style request model and display identifier loaded correctly")
+        return True
+
+    except Exception as e:
+        logger.error(f"✗ LLM_IDENTIFIER environment loading test failed: {e}")
+        return False
+    finally:
+        restore_environment(cleared_values)
+
+
 def test_api_base_model_inference():
     """Test API base to model inference"""
     logger.info("\n" + "-" * 60)
     logger.info("Testing API Base to Model Inference")
     logger.info("-" * 60)
+
+    cleared_values = pop_environment(["LLM_MODEL", "LLM_MODEL_NAME", "LLM_IDENTIFIER"])
 
     try:
         # Test different API base URLs
@@ -177,9 +265,11 @@ def test_api_base_model_inference():
 
     except Exception as e:
         logger.error(f"✗ API base inference test failed: {e}")
+        return False
+    finally:
         if "LLM_API_BASE" in os.environ:
             del os.environ["LLM_API_BASE"]
-        return False
+        restore_environment(cleared_values)
 
 
 def test_config_from_file():
@@ -200,6 +290,13 @@ def test_config_from_file():
                     "top_p": 0.7
                 },
                 "default_tools": ["bash", "grep", "calculator"],
+                "system_skills_dir": "skills/system",
+                "custom_skills_dir": "skills/custom",
+                "default_system_skills": ["docx", "pdf"],
+                "enable_system_skills": True,
+                "enable_custom_skill_tool": False,
+                "enable_subagent_tool": True,
+                "subagent_max_iterations": 4,
                 "enable_reflection": True,
                 "reflection_max_iterations": 5
             }))
@@ -216,6 +313,13 @@ def test_config_from_file():
         assert config.llm.temperature == 0.2, "Temperature not from file"
         assert config.llm.top_p == 0.7, "Top_p not from file"
         assert config.default_tools == ["bash", "grep", "calculator"], "Default tools not from file"
+        assert config.system_skills_dir == "skills/system", "System skills dir not from file"
+        assert config.custom_skills_dir == "skills/custom", "Custom skills dir not from file"
+        assert config.default_system_skills == ["docx", "pdf"], "Default system skills not from file"
+        assert config.enable_system_skills is True, "System skills enable flag not from file"
+        assert config.enable_custom_skill_tool is False, "Custom skill tool flag not from file"
+        assert config.enable_subagent_tool is True, "Subagent tool flag not from file"
+        assert config.subagent_max_iterations == 4, "Subagent max iterations not from file"
         assert config.enable_reflection is True, "Reflection flag not from file"
         assert config.reflection_max_iterations == 5, "Reflection iterations not from file"
 
@@ -243,6 +347,7 @@ def main():
         test_default_config,
         test_config_save_load,
         test_env_variable_loading,
+        test_identifier_env_loading,
         test_api_base_model_inference,
         test_config_from_file
     ]

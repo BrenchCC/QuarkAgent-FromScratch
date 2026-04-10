@@ -27,10 +27,33 @@ class SessionDeleteResponse(BaseModel):
     deleted: bool
 
 
+class SessionStopResponse(BaseModel):
+    """Session stop response schema."""
+
+    session_id: str
+    stop_requested: bool
+
+
 class ToolListResponse(BaseModel):
     """Tool list response schema."""
 
     tools: List[str]
+
+
+class SkillInfo(BaseModel):
+    """Skill metadata response schema."""
+
+    name: str
+    description: str
+    namespace: str
+    path: str
+    enabled: bool
+
+
+class SkillListResponse(BaseModel):
+    """Skill list response schema."""
+
+    skills: List[SkillInfo]
 
 
 class ChatRequest(BaseModel):

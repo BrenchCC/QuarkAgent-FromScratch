@@ -17,6 +17,7 @@ from app.schemas import (
     ChatResponse,
     SessionCreateResponse,
     SessionDeleteResponse,
+    SessionStopResponse,
     StreamEvent,
 )
 
@@ -108,6 +109,31 @@ def delete_session(session_id: str, request: Request) -> SessionDeleteResponse:
     return SessionDeleteResponse(session_id = session_id, deleted = True)
 
 
+@router.post("/sessions/{session_id}/stop", response_model = SessionStopResponse)
+def stop_session(session_id: str, request: Request) -> SessionStopResponse:
+    """
+    Request that the current session stops its active run.
+
+    Args:
+        session_id: Target session ID.
+        request: FastAPI request object.
+
+    Returns:
+        Session stop response.
+    """
+    manager = request.app.state.session_manager
+    service = request.app.state.agent_service
+
+    session = manager.get_session(session_id, touch = True)
+    if not session:
+        raise HTTPException(status_code = 404, detail = "Session not found or expired.")
+
+    return SessionStopResponse(
+        session_id = session_id,
+        stop_requested = service.request_stop(session_id),
+    )
+
+
 @router.post("/chat", response_model = ChatResponse)
 def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     """
@@ -135,6 +161,7 @@ def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             history = history,
             message = payload.message,
             max_iterations = payload.max_iterations,
+            session_id = payload.session_id,
         )
     except Exception as exc:
         manager.append_message(payload.session_id, "assistant", f"Error: {exc}")
@@ -187,6 +214,7 @@ async def chat_stream(payload: ChatRequest, request: Request) -> StreamingRespon
                 payload.message,
                 emit_event,
                 payload.max_iterations,
+                payload.session_id,
             )
         except Exception as exc:
             await event_queue.put(_build_error_event(str(exc)))
@@ -203,6 +231,7 @@ async def chat_stream(payload: ChatRequest, request: Request) -> StreamingRespon
 
     async def event_generator() -> AsyncGenerator[str, None]:
         producer_task = asyncio.create_task(produce_events())
+        client_disconnected = False
         try:
             while True:
                 event = await event_queue.get()
@@ -210,9 +239,12 @@ async def chat_stream(payload: ChatRequest, request: Request) -> StreamingRespon
                 if event.get("type") == "done":
                     break
                 if await request.is_disconnected():
+                    service.request_stop(payload.session_id)
+                    client_disconnected = True
                     break
         finally:
-            if not producer_task.done():
+            service.request_stop(payload.session_id)
+            if not client_disconnected and not producer_task.done():
                 producer_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await producer_task

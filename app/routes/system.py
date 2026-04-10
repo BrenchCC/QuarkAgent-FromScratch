@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 
 sys.path.append(os.getcwd())
 
-from app.schemas import HealthResponse, ToolListResponse
+from app.schemas import HealthResponse, SkillListResponse, ToolListResponse
 
 router = APIRouter()
 
@@ -45,3 +45,18 @@ def tools(request: Request) -> ToolListResponse:
     """
     service = request.app.state.agent_service
     return ToolListResponse(tools = service.get_available_tools())
+
+
+@router.get("/skills", response_model = SkillListResponse)
+def skills(request: Request) -> SkillListResponse:
+    """
+    Return available skill metadata.
+
+    Args:
+        request: FastAPI request object.
+
+    Returns:
+        Skill list payload.
+    """
+    service = request.app.state.agent_service
+    return SkillListResponse(skills = service.get_available_skills())

@@ -19,6 +19,65 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def clear_proxy_environment() -> dict:
+    """
+    Temporarily remove proxy variables from the current process environment.
+
+    Args:
+        None.
+
+    Returns:
+        Dictionary of removed environment variables and their original values.
+    """
+    removed_values = {}
+    proxy_keys = [
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ]
+
+    for key in proxy_keys:
+        if key in os.environ:
+            removed_values[key] = os.environ.pop(key)
+
+    return removed_values
+
+
+def restore_environment(saved_values: dict) -> None:
+    """
+    Restore environment variables from a saved dictionary.
+
+    Args:
+        saved_values: Environment variable values keyed by variable name.
+
+    Returns:
+        None.
+    """
+    for key, value in saved_values.items():
+        os.environ[key] = value
+
+
+def create_test_agent(**kwargs) -> QuarkAgent:
+    """
+    Build a test agent while temporarily disabling proxy environment variables.
+
+    Args:
+        **kwargs: Keyword arguments forwarded to `QuarkAgent`.
+
+    Returns:
+        Initialized `QuarkAgent` instance.
+    """
+    removed_proxy_values = clear_proxy_environment()
+
+    try:
+        return QuarkAgent(**kwargs)
+    finally:
+        restore_environment(removed_proxy_values)
+
+
 def test_agent_initialization():
     """Test QuarkAgent initialization"""
     logger.info("=" * 80)
@@ -27,7 +86,7 @@ def test_agent_initialization():
 
     try:
         # Test initialization with minimal parameters
-        agent = QuarkAgent(
+        agent = create_test_agent(
             model = "gpt-3.5-turbo",
             api_key = "dummy_key",
             temperature = 0.1,
@@ -37,7 +96,7 @@ def test_agent_initialization():
 
         # Test initialization with custom system prompt
         custom_prompt = "You are a custom assistant for testing purposes."
-        agent = QuarkAgent(
+        agent = create_test_agent(
             model = "gpt-3.5-turbo",
             api_key = "dummy_key",
             system_prompt = custom_prompt,
@@ -54,6 +113,38 @@ def test_agent_initialization():
         return False
 
 
+def test_endpoint_model_identifier_metadata():
+    """Test that endpoint-style request models keep LLM_IDENTIFIER as metadata."""
+    logger.info("\n" + "-" * 60)
+    logger.info("Testing Endpoint Model Identifier Resolution")
+    logger.info("-" * 60)
+
+    original_identifier = os.environ.get("LLM_IDENTIFIER")
+
+    try:
+        os.environ["LLM_IDENTIFIER"] = "Doubao-Seed-2.0-Pro"
+        agent = create_test_agent(
+            model = "ep-20260319-demo",
+            api_key = "dummy_key",
+            model_identifier = os.environ["LLM_IDENTIFIER"],
+            temperature = 0.1,
+            use_reflector = False
+        )
+        assert agent.model == "ep-20260319-demo", "Agent should keep the request model unchanged"
+        assert agent.model_identifier == "Doubao-Seed-2.0-Pro", "Agent should keep LLM_IDENTIFIER as metadata"
+        logger.info("✓ Endpoint model identifier metadata passed")
+        return True
+
+    except Exception as e:
+        logger.error(f"✗ Endpoint model identifier metadata test failed: {e}")
+        return False
+    finally:
+        if original_identifier is None:
+            os.environ.pop("LLM_IDENTIFIER", None)
+        else:
+            os.environ["LLM_IDENTIFIER"] = original_identifier
+
+
 def test_agent_tool_management():
     """Test agent tool management capabilities"""
     logger.info("\n" + "-" * 60)
@@ -61,7 +152,7 @@ def test_agent_tool_management():
     logger.info("-" * 60)
 
     try:
-        agent = QuarkAgent(
+        agent = create_test_agent(
             model = "gpt-3.5-turbo",
             api_key = "dummy_key",
             temperature = 0.1,
@@ -102,7 +193,7 @@ def test_tool_description_builder():
     logger.info("-" * 60)
 
     try:
-        agent = QuarkAgent(
+        agent = create_test_agent(
             model = "gpt-3.5-turbo",
             api_key = "dummy_key",
             temperature = 0.1,
@@ -137,7 +228,7 @@ def test_json_extraction_methods():
     logger.info("-" * 60)
 
     try:
-        agent = QuarkAgent(
+        agent = create_test_agent(
             model = "gpt-3.5-turbo",
             api_key = "dummy_key",
             temperature = 0.1,
@@ -159,8 +250,10 @@ def test_json_extraction_methods():
 
         # Test write tool args extraction
         write_text = """
-        path: "test.txt"
-        content: "This is test content with "quoted" text"
+        {
+            "path": "test.txt",
+            "content": "This is test content with \\\"quoted\\\" text"
+        }
         """
 
         args = agent._extract_write_args(write_text)
@@ -168,6 +261,7 @@ def test_json_extraction_methods():
         assert args is not None, "Failed to extract write tool args"
         assert "path" in args, "Path not in extracted args"
         assert "content" in args, "Content not in extracted args"
+        assert args["content"] == 'This is test content with "quoted" text', "Content parsing mismatch"
 
         logger.info("✓ All JSON extraction tests passed")
         return True
@@ -184,7 +278,7 @@ def test_tool_call_parser():
     logger.info("-" * 60)
 
     try:
-        agent = QuarkAgent(
+        agent = create_test_agent(
             model = "gpt-3.5-turbo",
             api_key = "dummy_key",
             temperature = 0.1,
@@ -221,6 +315,7 @@ def main():
 
     tests = [
         test_agent_initialization,
+        test_endpoint_model_identifier_metadata,
         test_agent_tool_management,
         test_tool_description_builder,
         test_json_extraction_methods,

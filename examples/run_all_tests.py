@@ -65,6 +65,8 @@ def main():
     test_scripts = [
         "test_json_llm_utils.py",
         "test_agent_basic.py",
+        "test_skills.py",
+        "test_subagent.py",
         "test_tools.py",
         "test_memory.py",
         "test_config.py",

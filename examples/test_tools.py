@@ -6,26 +6,12 @@ import os
 import sys
 import tempfile
 import logging
+
 sys.path.append(os.getcwd())
 
 from quarkagent.tools import get_registered_tools, get_tool, execute_tool
-from quarkagent.tools.basic_tools import (
-    read_file,
-    write_file,
-    edit_file,
-    list_dir,
-    bash_command
-)
-from quarkagent.tools.caculator import calculator
-from quarkagent.tools.code_tools import (
-    search_by_pattern,
-    search_by_regex,
-    get_file_content,
-    write_new_file,
-    update_file_content,
-    view_files,
-    run_command
-)
+from quarkagent.tools.basic_tools import calculator
+from quarkagent.tools.code_tools import read, write, edit, glob, grep, bash
 
 # Configure logging
 logging.basicConfig(
@@ -80,7 +66,7 @@ def test_calculator_tool():
             ("3 * 4", 12),
             ("10 - 5", 5),
             ("100 / 4", 25),
-            ("2^3", 8),
+            ("2 ** 3", 8),
             ("sqrt(16)", 4)
         ]
 
@@ -111,19 +97,20 @@ def test_file_operations_tools():
             temp.write("Test content for file operations")
 
         # Test read file
-        content = read_file(path = temp_filename)
+        content = read(path = temp_filename)
         logger.info(f"✓ Read file successful: {content.strip()}")
+        assert "Test content for file operations" in content, "Read tool failed"
 
         # Test write file
         test_content = "Updated content from write tool"
-        write_file(path = temp_filename, content = test_content)
-        updated_content = read_file(path = temp_filename)
-        assert updated_content.strip() == test_content, "Write tool failed to update file"
+        write(path = temp_filename, content = test_content)
+        updated_content = read(path = temp_filename)
+        assert test_content in updated_content, "Write tool failed to update file"
         logger.info("✓ Write file successful")
 
         # Test edit file
-        edit_file(path = temp_filename, old_str = test_content, new_str = "Edited content")
-        edited_content = read_file(path = temp_filename)
+        edit(path = temp_filename, old = test_content, new = "Edited content")
+        edited_content = read(path = temp_filename)
         assert "Edited content" in edited_content, "Edit tool failed"
         logger.info("✓ Edit file successful")
 
@@ -151,12 +138,14 @@ def test_bash_tool():
 
     try:
         # Test simple command
-        result = bash_command(cmd = "echo 'Hello World'")
+        result = bash(cmd = "echo 'Hello World'")
         logger.info(f"✓ Bash command successful: {result}")
-        assert "Hello World" in str(result), "Bash command failed"
+        assert result["exit_code"] == 0, "Bash command failed"
+        assert "Hello World" in result["stdout"], "Bash output mismatch"
 
         # Test command with exit code
-        result = bash_command(cmd = "ls -la")
+        result = bash(cmd = "ls -la")
+        assert result["exit_code"] == 0, "ls command failed"
         logger.info("✓ ls command executed successfully")
 
         logger.info("✓ All bash tool tests passed")
@@ -175,7 +164,7 @@ def test_directory_listing():
 
     try:
         # List current directory
-        result = list_dir(path = ".")
+        result = glob(pattern = "*", path = ".")
         logger.info(f"✓ Directory listing successful: {len(result)} items")
         assert len(result) > 0, "Directory listing returned no items"
 
@@ -196,13 +185,13 @@ def test_code_tools():
     try:
         # Test search by pattern (looking for test files)
         pattern = "test_"
-        files = search_by_pattern(pattern = pattern, path = ".")
+        files = glob(pattern = "**/test_*.py", path = ".")
         logger.info(f"✓ Found {len(files)} files matching pattern '{pattern}'")
         assert len(files) > 0, "Search by pattern failed"
 
         # Test search by regex
         regex = r"test.*\.py$"
-        matches = search_by_regex(pattern = regex, path = ".")
+        matches = grep(pattern = regex, path = ".")
         logger.info(f"✓ Found {len(matches)} files matching regex '{regex}'")
         assert len(matches) > 0, "Search by regex failed"
 
